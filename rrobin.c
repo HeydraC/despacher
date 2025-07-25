@@ -1,138 +1,120 @@
+#include<pthread.h>
 #include<stdio.h>
 #include<unistd.h>
-#include<stdlib.h>
-#include<signal.h>
-#include<sys/mman.h>
 #include<semaphore.h>
-#include<fcntl.h>
 #include "queue.h"
 
-pid_t child;
-struct process *p; //Información del proceso en el procesador
-int *seconds; //Segundos que han pasado desde que inició el programa
+struct process p;
+int seconds, end;
+short bit;
+sem_t process, ready, dispatch;
 queue procQueue;
 
-//Proceso que tiene el procesador
-void process(int procTime, pid_t pid){
-	sem_t* process = sem_open("process", O_CREAT, 0600, 0);
+void* processor(){
+	sem_wait(&process);
 
-
-	for (int i = 0; i < procTime; ++i){
-		++*seconds;
-		sem_wait(process);//Espera a sincronizar con el segundo
-		printf("Segundo %d: #%d EXECUTING\n", *seconds, pid);
-	}
-
-	++*seconds;
-	p->procTime = -1;//Indica que el proceso ha muerto
-
-	sem_close(process);
-	exit(0);
-}
-
-//Encargado de llevar cuenta de los segundos
-void time(){
-	sem_t* process = sem_open("process", O_CREAT, 0600, 0);
-	sem_t* ready = sem_open("ready", O_CREAT, 0600, 0);
-	sem_t* dispatch = sem_open("dispatch", O_CREAT, 0600, 0);
-	
-	sem_wait(ready); //Espera a que haya un proceso listo
-	
-	while (procQueue.size > 0){ //Mientras haya procesos que ejecutar
-		sleep(1);
-
-		--p->quantum;
-
-		//Si se termina el quantum con procesos esperando o termina el proceso
-		if ((p->quantum <= 0 && procQueue.size > 1) || p->procTime < 0){
-
-			if (p->procTime < 0) --procQueue.size; //Si muere un proceso ya no lo cuento en la cola
-
-			sem_post(dispatch);
-			sem_wait(ready); //Avisa y espera que le avisen de vuelta
-		}else{
-			sem_post(process);
+	while(1){
+		for (; seconds < end; ++seconds){
+			sem_wait(&process);
+			printf("Segundo %d: #%d EXECUTING\n", seconds, p.pid);
+			if (seconds != end - 1) sem_post(&ready);
 		}
 
+		p.procTime = -1;
+		sem_post(&ready);
+		sem_wait(&process);
 	}
-
-	sem_close(process);
-	sem_close(dispatch);
-	sem_close(ready);
-	sem_unlink("process"); //El padre elmina los semáforos con nombre
-	sem_unlink("dispatch");
-	sem_unlink("ready");
 }
 
-void dispatcher(){
-	sem_t* dispatch = sem_open("dispatch", O_CREAT, 0600, 0);
-	sem_t* ready = sem_open("ready", O_CREAT, 0600, 0);
-	int start;
+void timer(){
+	sem_wait(&ready);
 
+	while (bit){
+		sleep(1);
+
+		--p.quantum;
+
+		if ((p.quantum <= 0 && procQueue.size > 0) || p.procTime < 0){
+			sem_post(&dispatch);
+			sem_wait(&ready);
+		}else{
+			sem_post(&process);
+			sem_wait(&ready);
+		}
+	}
+}
+
+void* dispatcher(){
+	int start, lastDead = 1;
 	printf("Segundo 0: ");
 
-	while(pop(&procQueue, p)){ //Mientras haya procesos en la cola
-		printf("#%d BEGIN\n", p->pid);
-		start = *seconds;
-	
-		child = fork();
+	while (pop(&procQueue, &p)){
+		printf("#%d BEGIN\n", p.pid);
 
-		if (!child) process(p->procTime - 1, p->pid); //El proceso hijo será el que ocupe el procesador
-		//El primer segundo del proceso es el del BEGIN
-		
-		sem_post(ready);
-		sem_wait(dispatch);//Espera a que termine el quantum
+		start = seconds;
 
-		if (p->procTime > 0){//Si le queda tiempo de ejecución se guarda otra vez
-			kill(child, SIGKILL);//Mata al proceso que estaba activo
+		//El primer segundo del proceso es el de BEGIN
+		end = seconds + p.procTime - 1;
 
-			p->procTime -= *seconds - start;
+		if (lastDead){
+			sem_post(&process);
+			lastDead = 0;
+		}
+		sem_post(&ready);
+		sem_wait(&dispatch);
+
+		if (p.procTime > 0){
+			printf("Segundo %d: #%d SUSPENSION ", seconds, p.pid);
+			++seconds;
+			p.procTime -= seconds - start;
 			
-			printf("Segundo %d: #%d SUSPENSION ", *seconds, p->pid);
-			
-			push(&procQueue, p->pid, p->procTime);
-			sem_post(ready);
+			push(&procQueue, p.pid, p.procTime);
 		}else{
-			printf("Segundo %d: #%d END ", *seconds, p->pid);
+			printf("Segundo %d: #%d END ", seconds, p.pid);
+			++seconds;
+			lastDead = 1;
 		}
 	}
 
 	puts("");
-	sem_post(ready);
-
-	sem_close(dispatch);
-	sem_close(ready);
+	bit = 0; //Avisa el final del programa
+	sem_post(&ready);
 }
 
 int main(){
+	pthread_t t[2];
 
-	//Se crea una sección de memoria compartida y se asigna
-	p = (struct process*)mmap(
-		        NULL, sizeof(int) + sizeof(struct process), PROT_READ | PROT_WRITE,
-		        MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-	seconds = (int*) (p + 1);
-	//(Espacio de p)|(Espacio de seconds)|(Final del heap)
+	sem_init(&process, 0, 0);
+	sem_init(&ready, 0, 0);
+	sem_init(&dispatch, 0, 0);
 
-	*seconds = 0;
+	bit = 1;
 
+	//El primer segundo es de BEGIN
+	seconds = 1;
+	//Placeholder antes de tener el primer proceso
+	end = 999; 
+
+	
 	QueueInit(&procQueue, 4); //Se inicializa una cola con un quantum de 4 segundos
 
 	push(&procQueue, 0, 8); //Proceso de 8 segundos
 	push(&procQueue, 1, 16); //Proceso de 16 segundos
 	push(&procQueue, 2, 3); //Proceso de 3 segundos
 	push(&procQueue, 3, 1); //Proceso de 1 segundo
-	
 
-	child = fork();
+	pthread_create(t, NULL, dispatcher, NULL);
+	pthread_create(t + 1, NULL, processor, NULL);
 
-	//El proceso hijo será el dispatcher y el padre llevará cuenta del tiempo
-	if (!child){
-		dispatcher();
-	}else{
-		time();
-	}
-	
-	QueueDestroy(&procQueue); //Se libera la memoria asignada a la cola
+	timer();
+
+	pthread_cancel(t[1]);
+	pthread_join(t[0], NULL);
+
+	QueueDestroy(&procQueue);
+	sem_destroy(&process);
+	sem_destroy(&ready);
+	sem_destroy(&dispatch);
 
 	return 0;
 }
