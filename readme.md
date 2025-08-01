@@ -2,9 +2,9 @@ Para ejecutar el proyecto solo hacen falta las siguientes 2 líneas
 
 make
 
-./rrobin <nombre>
+./rrobin nombre
 
-Con <nombre> siendo el nombre del archivo con la lista de procesos a ejecutar
+Con nombre siendo el nombre del archivo con la lista de procesos a ejecutar
 
 El proyecto se ejecuta en 3 hilos
 
