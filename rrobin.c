@@ -2,6 +2,7 @@
 #include<stdio.h>
 #include<unistd.h>
 #include<semaphore.h>
+#include<string.h>
 #include "queue.h"
 
 struct process p;
@@ -83,9 +84,28 @@ void* dispatcher(){
 	sem_post(&ready);
 }
 
-int main(){
+struct process filtrarInput(char* linea, pid_t pidCount){
+	struct process  temp;
+	int arr, prio, cpu, p, s, m, d;
+	sscanf(linea, "%d, %d, %d, %d, %d, %d, %d", &arr, &prio, &cpu, &p, &s, &m, &d);
+		temp.pid=pidCount;
+		temp.arrival=arr;
+		temp.priority=prio;
+		temp.procTime=cpu;
+		temp.printer=p;
+		temp.scanner=s;
+		temp.modem=m;
+		temp.dvd=d;
+		temp.quantum=0;
+	
+	return temp;
+	
+}
+
+int main(int argc, char *argv[]){
 	pthread_t t[2];
-	struct process aux; //Un proceso que pushear para hacer pruebas
+	struct process temp;
+	char *nombreArchivo= argv[1];
 
 	sem_init(&process, 0, 0);
 	sem_init(&ready, 0, 0);
@@ -100,17 +120,30 @@ int main(){
 	
 	SuperColaInit(&jobList); //Se inicializa la cola retroalimentada
 
-	procInit(&aux, 0, 8, 1);
-	SuperColaPush(&jobList, aux); //Proceso de 8 segundos
+	FILE *i=fopen(nombreArchivo, "r");
+	if (!i)
+		return EXIT_FAILURE;
+	char buffer[256];
+	pid_t pidCount=0;
+	while (fgets(buffer, sizeof(buffer), i)){
+	if(strlen(buffer)>1){
+		temp=filtrarInput(buffer, pidCount++);
+		SuperColaPush(&jobList, temp);
+		}
+	}
+	fclose(i);
 
-	procInit(&aux, 1, 16, 1);
-	SuperColaPush(&jobList, aux); //Proceso de 16 segundos
-
-	procInit(&aux, 2, 3, 1);
-	SuperColaPush(&jobList, aux); //Proceso de 3 segundos
-
-	procInit(&aux, 3, 1, 1);
-	SuperColaPush(&jobList, aux); //Proceso de 1 segundo
+// 	procInit(&aux, 0, 8, 1);
+// 	SuperColaPush(&jobList, aux); //Proceso de 8 segundos
+// 
+// 	procInit(&aux, 1, 16, 1);
+// 	SuperColaPush(&jobList, aux); //Proceso de 16 segundos
+// 
+// 	procInit(&aux, 2, 3, 1);
+// 	SuperColaPush(&jobList, aux); //Proceso de 3 segundos
+// 
+// 	procInit(&aux, 3, 1, 1);
+// 	SuperColaPush(&jobList, aux); //Proceso de 1 segundo
 
 	pthread_create(t, NULL, dispatcher, NULL);
 	pthread_create(t + 1, NULL, processor, NULL);
