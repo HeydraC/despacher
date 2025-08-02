@@ -19,7 +19,6 @@ Se tiene una SuperCola encargada de introducir al proceso en la cola de su prior
 Preferiblemente mantener la comunicación mediante semáforos de forma:
 dispatcher<->timer<->processor
 
-El código del hilo dispatcher ya está mayormente listo así que no habría que cambiar nada de él ni de las colas (espero)
 
 Para hacer un cambio de contexto desde el hilo timer sólo hay que hacer
 
@@ -27,5 +26,5 @@ sem_post(&dispatch);
 
 sem_wait(&ready);
 
-Así, lo único que queda hacer es la lógica para que los procesos entren en diferentes momentos y todo lo relacionado a E/S
-(En mi opinión ambas cosas deberían hacerse para ejecutarse en el hilo timer)
+Así, lo único que queda hacer es la lógica de los dispositivos de E/S
+(En mi opinión debería ejecutarse en el hilo timer)

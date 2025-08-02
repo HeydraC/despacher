@@ -5,11 +5,21 @@
 #include<string.h>
 #include "queue.h"
 
+//Información del proceso que se está ejecutando
 struct process p;
+//Tiempo actual y tiempo hasta el final del proceso
 int seconds, end;
+//Booleano para avisar final del programa
 short bit;
+//Semáforos para sincronización
 sem_t process, ready, dispatch;
+//Cola de procesos a manejar por el dispatcher
 SuperCola jobList;
+//Procesos por llegar, cantidad y un iterador
+struct process beforeArrival[1024];
+int n, actual;
+//Mayor prioridad en la cola actualmente
+short priority;
 
 void* processor(){
 	sem_wait(&process);
@@ -35,7 +45,19 @@ void timer(){
 
 		--p.quantum;
 
-		if ((p.quantum <= 0 && jobList.size > 0) || p.procTime < 0){
+		//Se agregan todos los procesos que llegan a un tiempo determinado
+		while (actual < n && beforeArrival[actual].arrival <= seconds){
+			SuperColaPush(&jobList, beforeArrival[actual]);
+
+			if (beforeArrival[actual].priority < priority)
+				priority = beforeArrival[actual].priority;
+			
+			++actual;
+		}
+
+
+		//Se acaba el quantum con procesos en espera, termina el proceso o llega un proceso de mayor prioridad
+		if ((p.quantum <= 0 && jobList.size > 0) || p.procTime < 0 || priority < p.priority){
 			sem_post(&dispatch);
 			sem_wait(&ready);
 		}else{
@@ -56,6 +78,9 @@ void* dispatcher(){
 
 		//El primer segundo del proceso es el de BEGIN
 		end = seconds + p.procTime - 1;
+
+		//Se guarda la mayor prioridad en la cola
+		priority = p.priority;
 
 		if (lastDead){
 			sem_post(&process);
@@ -82,6 +107,54 @@ void* dispatcher(){
 	puts("");
 	bit = 0; //Avisa el final del programa
 	sem_post(&ready);
+}
+
+void sortByArrival(struct process* arr, int n){
+	if (n == 1) return;
+
+	int size1, size2, a, b, c;
+	size1 = n/2;
+	size2 = n - size1;
+
+	struct process *arr1, *arr2;
+
+	arr1 = malloc(sizeof(struct process)*size1);
+	arr2 = malloc(sizeof(struct process)*size2);
+
+	for (int i = 0; i < size1; ++i) arr1[i] = arr[i];
+	for (int i = size1; i < n; ++i) arr2[i-size1] = arr[i];
+
+	sortByArrival(arr1, size1);
+	sortByArrival(arr2, size2);
+
+	a = 0; b = 0; c = 0;
+
+	while (a < size1 && b < size2){
+		//Se ordena por tiempo de llegada y por pid
+		if (arr1[a].arrival < arr2[b].arrival ||
+			(arr1[a].arrival == arr2[b].arrival && arr1[a].pid < arr2[b].pid)){
+			arr[c] = arr1[a];
+			++a;
+		}else{
+			arr[c] = arr2[b];
+			++b;
+		}
+
+		++c;
+	}
+
+	while (a < size1){
+		arr[c] = arr1[a];
+		++a; ++c;
+	}
+
+	while (b < size2){
+		arr[c] = arr2[b];
+		++b; ++c;
+	}
+
+	free(arr1);
+	free(arr2);
 }
 
 struct process filtrarInput(char* linea, pid_t pidCount){
@@ -117,6 +190,11 @@ int main(int argc, char *argv[]){
 	seconds = 1;
 	//Placeholder antes de tener el primer proceso
 	end = 999; 
+	//Inicializando iterador y tamaño
+	actual = 0;
+	n = 0;
+	//Placeholder antes de tener el primer proceso
+	priority = -1;
 	
 	SuperColaInit(&jobList); //Se inicializa la cola retroalimentada
 
@@ -126,24 +204,20 @@ int main(int argc, char *argv[]){
 	char buffer[256];
 	pid_t pidCount=0;
 	while (fgets(buffer, sizeof(buffer), i)){
-	if(strlen(buffer)>1){
-		temp=filtrarInput(buffer, pidCount++);
-		SuperColaPush(&jobList, temp);
+		if(strlen(buffer)>1){
+			temp=filtrarInput(buffer, pidCount++);
+			
+			if (temp.arrival > 0){
+				beforeArrival[n] = temp;
+				++n;
+			}else{
+				SuperColaPush(&jobList, temp);
+			}//Sólo se meten a la cola los procesos que llegan al segundo 0
 		}
 	}
 	fclose(i);
 
-// 	procInit(&aux, 0, 8, 1);
-// 	SuperColaPush(&jobList, aux); //Proceso de 8 segundos
-// 
-// 	procInit(&aux, 1, 16, 1);
-// 	SuperColaPush(&jobList, aux); //Proceso de 16 segundos
-// 
-// 	procInit(&aux, 2, 3, 1);
-// 	SuperColaPush(&jobList, aux); //Proceso de 3 segundos
-// 
-// 	procInit(&aux, 3, 1, 1);
-// 	SuperColaPush(&jobList, aux); //Proceso de 1 segundo
+	sortByArrival(beforeArrival, n); //Se ordenan los procesos por tiempo de llegada
 
 	pthread_create(t, NULL, dispatcher, NULL);
 	pthread_create(t + 1, NULL, processor, NULL);
