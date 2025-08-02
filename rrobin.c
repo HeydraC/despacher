@@ -98,13 +98,16 @@ void* dispatcher(){
 			
 			SuperColaPush(&jobList, p);
 		}else{
-			printf("Segundo %d: #%d END ", seconds, p.pid);
+			printf("Segundo %d: #%d END\n", seconds, p.pid);
 			++seconds;
 			lastDead = 1;
+			if (jobList.size > 0){
+				printf("Segundo %d: ", seconds);
+				sleep(1);
+			}
 		}
 	}
 
-	puts("");
 	bit = 0; //Avisa el final del programa
 	sem_post(&ready);
 }
