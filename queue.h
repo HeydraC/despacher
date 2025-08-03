@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+//Información de un proceso
 struct process
 {
     pid_t pid;

@@ -7,7 +7,7 @@
 
 // Información del proceso que se está ejecutando
 struct process p;
-// Tiempo actual y tiempo hasta el final del proceso
+// Tiempo actual
 int seconds;
 // Booleano para avisar final del programa
 short bit;
@@ -28,6 +28,10 @@ int availableResource[4] = {2, 1, 1, 2};
 // Cola de bloqueados
 queue processesBlocked;
 
+//Archivo de log
+FILE* file;
+
+//Retorna 1 si hay recursos suficientes para ejecutar el proceso, 0 de lo contrario
 int canTakeResources(int needImpresoras, int needScanner, int needModem, int needDvd)
 {
 
@@ -43,14 +47,15 @@ int canTakeResources(int needImpresoras, int needScanner, int needModem, int nee
 	return 1;
 }
 
+//Hilo para el manejo de procesos bloqueados
 void *blocked()
 {
 	while (bit)
 	{
 		sem_wait(&blockedSem);
 
-		struct node *auxFirst = processesBlocked.first;
-		while (auxFirst != NULL)
+		struct node *auxFirst = processesBlocked.last; //Carlos hizo la cola al revés
+		while (auxFirst != NULL) //Se recorre la lista en busca de procesos que se les puedan dar recursos
 		{
 			struct process temp = auxFirst->p;
 			if (canTakeResources(temp.printer, temp.scanner, temp.modem, temp.dvd))
@@ -59,14 +64,14 @@ void *blocked()
 				availableResource[1] -= temp.scanner;
 				availableResource[2] -= temp.modem;
 				availableResource[3] -= temp.dvd;
+				//Se dan los recursos al proceso
 
-				popPid(&processesBlocked, auxFirst);
-				SuperColaPush(&jobList, temp);
-				break;
+				popPid(&processesBlocked, auxFirst); //Se saca el proceso de la cola de bloqueados
+				SuperColaPush(&jobList, temp); //Se hace push del proceso a la cola retroalimentada
 			}
-			auxFirst = auxFirst->next;
+			auxFirst = auxFirst->prev; //Cola al revés y no quiero cambiar todo lo demás
 		}
-		sem_post(&dispatch);
+		sem_post(&dispatch); //Avisa al dispatcher que terminó su tarea
 	}
 }
 
@@ -77,38 +82,43 @@ void timer()
 
 	while (bit)
 	{
-		sleep(1);
+		sleep(1); //Da una espera de 1 segundo entre cada impresión
 
 		--p.quantum;
-		--p.procTime;
+		--p.procTime; //Disminuye el tiempo restante de ejecución y del quantum
 		++timeSpent;
 
 		if (timeSpent >= 20)
-			p.procTime = 0;
+			p.procTime = 0; //El proceso finaliza luego de ejecutarse por 20 sergundos seguidos
 
 		// Se agregan todos los procesos que llegan a un tiempo determinado
 		while (actual < n && beforeArrival[actual].arrival <= seconds)
-		{
-			if (canTakeResources(beforeArrival[actual].printer, beforeArrival[actual].scanner, beforeArrival[actual].modem, beforeArrival[actual].dvd) || beforeArrival[actual].priority == 0)
+		{	
+			//Si hay recursos suficientes para el proceso
+			if (canTakeResources(beforeArrival[actual].printer, beforeArrival[actual].scanner,
+				beforeArrival[actual].modem, beforeArrival[actual].dvd) || beforeArrival[actual].priority == 0)
 			{
 				availableResource[0] -= beforeArrival[actual].printer;
 				availableResource[1] -= beforeArrival[actual].scanner;
 				availableResource[2] -= beforeArrival[actual].modem;
 				availableResource[3] -= beforeArrival[actual].dvd;
-
-				SuperColaPush(&jobList, beforeArrival[actual]);
+				//Se le dan los recursos
+				
+				SuperColaPush(&jobList, beforeArrival[actual]); //Y se introduce en la cola retroalimentada
 
 				if (beforeArrival[actual].priority < priority)
 				{
 					priority = beforeArrival[actual].priority;
+					//Se cambia la mayor prioridad en la cola para saber que se necesita un cambio de contexto
 				}
 			}
 			else
 			{
 				push(&processesBlocked, beforeArrival[actual]);
+				//Si no hay recursos suficientes se mete el proceso a la cola de bloqueados
 			}
 			--nInBeforeArrival;
-			++actual;
+			++actual; //Se pasa al siguiente proceso por llegar
 		}
 
 		// Se acaba el quantum con procesos en espera, termina el proceso o llega un proceso de mayor prioridad
@@ -119,14 +129,13 @@ void timer()
 			sem_post(&dispatch);
 			sem_wait(&ready);
 
-			if (p.pid != lastProcess)
+			if (p.pid != lastProcess) //Si el proceso sacado es el mismo, cuenta como ejecución continua del mismo
 				timeSpent = 0;
 		}
 		else
 		{
-			// sem_post(&process);
-			// sem_wait(&ready);
 			printf("Segundo %d: #%d EXECUTING\n", seconds, p.pid);
+			fprintf(file, "Segundo %d: #%d EXECUTING\n", seconds, p.pid);
 			++seconds;
 		}
 	}
@@ -136,6 +145,8 @@ void *dispatcher()
 {
 	int firstCycle = 1;
 	int f;
+
+	//Mientras haya procesos en la cola retroalimentada o por llegar
 	while ((f = SuperColaPop(&jobList, &p)) || nInBeforeArrival > 0)
 	{
 		if (f == 0 && nInBeforeArrival > 0)
@@ -144,37 +155,43 @@ void *dispatcher()
 			sem_post(&ready);
 			sem_wait(&dispatch);
 			continue;
+			//Continúa la ejecución en caso de haber procesos por llegar
 		}
 
 		if (firstCycle)
 		{
 			printf("Segundo %d: ", seconds - 1);
+			fprintf(file, "Segundo %d: ", seconds - 1);
 			firstCycle = 0;
+			//En caso de ser la primera vez que se imprime, ya que las demás se hacen por separado
 		}
 
-		printf("#%d BEGIN\n", p.pid);
+		printf("#%d BEGIN\n", p.pid); //Se indica el inicio del proceso sacado de la cola
+		fprintf(file, "#%d BEGIN\n", p.pid);
 
 		// Se guarda la mayor prioridad en la cola
 		priority = p.priority;
 
 		sem_post(&ready);
-		sem_wait(&dispatch);
+		sem_wait(&dispatch); //Se avisa a timer que terminó el cambio de contexto
 
-		// p.procTime -= seconds - start;
 		++seconds;
+		//Segundo correspondiente al final del proceso actual
 
-		if (p.procTime > 0)
+		if (p.procTime > 0) //Si queda tiempo de ejecución
 		{
-			printf("Segundo %d: #%d SUSPENSION ", seconds - 1, p.pid);
+			printf("Segundo %d: #%d SUSPENSION ", seconds - 1, p.pid); //Se indica la suspensión
+			fprintf(file, "Segundo %d: #%d SUSPENSION ", seconds - 1, p.pid);
 
 			if (p.priority < 3)
-				++p.priority;
+				++p.priority; //Se degrada la prioridad de los procesos de usuario
 
-			SuperColaPush(&jobList, p);
+			SuperColaPush(&jobList, p); //Se vuelven a meter a la cola
 		}
 		else
 		{
-			printf("Segundo %d: #%d END\n", seconds - 1, p.pid);
+			printf("Segundo %d: #%d END\n", seconds - 1, p.pid); //Se indica el final del proceso
+			fprintf(file, "Segundo %d: #%d END\n", seconds - 1, p.pid);
 
 			if (processesBlocked.size > 0)
 			{
@@ -183,15 +200,16 @@ void *dispatcher()
 				availableResource[1] += p.scanner;
 				availableResource[2] += p.modem;
 				availableResource[3] += p.dvd;
-				sem_post(&blockedSem);
+				sem_post(&blockedSem); //Se liberan los recursos y se revisa si se puede ejecutar algún proceso bloqueado
 				sem_wait(&dispatch);
 			}
 			if (jobList.size > 0)
 			{
-				sleep(1);
+				sleep(1); //Segundo entre END y BEGIN
 				printf("Segundo %d: ", seconds);
+				fprintf(file, "Segundo %d: ", seconds);
 			}
-			++seconds;
+			++seconds; //Segundo entre END y BEGIN
 		}
 	}
 
@@ -199,6 +217,7 @@ void *dispatcher()
 	sem_post(&ready);
 }
 
+//Mergesort de arreglo de procesos por llegar
 void sortByArrival(struct process *arr, int n)
 {
 	if (n == 1)
@@ -284,7 +303,7 @@ int main(int argc, char *argv[])
 	pthread_t t;
 	pthread_t t2;
 	struct process temp;
-	char *nombreArchivo = argv[1];
+	char *nombreArchivo = argv[1]; //Se toma el nombre del archivo del argumento usado al ejecutar rrobin
 
 	sem_init(&ready, 0, 0);
 	sem_init(&blockedSem, 0, 0);
@@ -308,11 +327,11 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	char buffer[256];
 	pid_t pidCount = 0;
-	while (fgets(buffer, sizeof(buffer), i))
+	while (fgets(buffer, sizeof(buffer), i)) //Se toma una linea del archivo
 	{
-		if (strlen(buffer) > 1)
+		if (strlen(buffer) > 1)//Si no es el final
 		{
-			temp = filtrarInput(buffer, pidCount++);
+			temp = filtrarInput(buffer, pidCount++); //Se guarda la información del nuevo proceso y se asigna su pid
 
 			if (temp.printer > maxInstanceResources[0])
 			{
@@ -333,16 +352,16 @@ int main(int argc, char *argv[])
 			{
 				printf("El procesos %d rechazado por falta de recursos \n", temp.pid);
 				continue;
-			}
+			} //Se rechazan procesos que piden más recursos de los disponibles
 
 			if (temp.arrival > 0)
 			{
-				beforeArrival[n] = temp;
+				beforeArrival[n] = temp; //Se guardan los procesos que llegarán más adelante en la ejecución
 				++n;
 				++nInBeforeArrival;
 			}
 			else
-			{
+			{ // Sólo se meten a la cola los procesos que llegan al segundo 0
 				if (canTakeResources(temp.printer, temp.scanner, temp.modem, temp.dvd) || temp.priority == 0)
 				{
 
@@ -350,18 +369,20 @@ int main(int argc, char *argv[])
 					availableResource[1] -= temp.scanner;
 					availableResource[2] -= temp.modem;
 					availableResource[3] -= temp.dvd;
-					SuperColaPush(&jobList, temp);
+					SuperColaPush(&jobList, temp); //Si hay recursos suficientes para el proceso se le asignan y se introduce a la cola
 				}
 				else
 				{
 
-					push(&processesBlocked, temp);
+					push(&processesBlocked, temp); //De lo contrario se introduce a la cola de bloqueados
 				}
 
-			} // Sólo se meten a la cola los procesos que llegan al segundo 0
+			}
 		}
 	}
 	fclose(i);
+
+	file = fopen("[31708119][31703888][31307754].txt", "w+");
 
 	sortByArrival(beforeArrival, n); // Se ordenan los procesos por tiempo de llegada
 
@@ -374,10 +395,11 @@ int main(int argc, char *argv[])
 	sem_post(&blockedSem);
 	pthread_join(t2, NULL);
 
+	fclose(file);
 	SuperColaDestroy(&jobList);
 	QueueDestroy(&processesBlocked);
 	sem_destroy(&ready);
-	sem_destroy(&dispatch);
+	sem_destroy(&dispatch); //Se libera toda la memoria asignada
 
 	return 0;
 }

@@ -6,7 +6,7 @@ void QueueInit(queue *q, int quantum_val)
     q->last = NULL;
     q->size = 0;
     q->quantum = quantum_val;
-}
+} //Inicialización de los valores de la cola
 
 void QueueDestroy(queue *q)
 {
@@ -20,7 +20,7 @@ void QueueDestroy(queue *q)
     q->first = NULL;
     q->last = NULL;
     q->size = 0;
-}
+} //Liberación de la memoria asignada a la cola
 
 // Inserta un nuevo proceso al principio de la cola (FCFS para elementos de igual prioridad)
 // Acepta un struct process completo para almacenar
@@ -80,7 +80,7 @@ int pop(queue *q, struct process *p_out)
     return 1; // Proceso sacado con éxito
 }
 
-int popPid(queue *q, struct node *p_pop)
+int popPid(queue *q, struct node *p_pop) //Pop de un proceso especificado
 {
 
     if (p_pop->next == NULL && p_pop->prev == NULL)
@@ -132,7 +132,7 @@ void SuperColaDestroy(SuperCola *sc)
         QueueDestroy(&sc->queues[i]);
     }
     sc->size = 0;
-}
+} //Liberación de la memoria de todas las colas
 
 void SuperColaPush(SuperCola *sc, struct process process_to_add)
 {
@@ -173,4 +173,4 @@ void procInit(struct process *p, int pid, int procTime, int priority)
     p->pid = pid;
     p->procTime = procTime;
     p->priority = priority;
-}
+} //Esto se suponía que era para probar, nunca lo usé y no lo quiero quitar :p
