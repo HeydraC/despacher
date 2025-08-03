@@ -8,103 +8,89 @@
 //Información del proceso que se está ejecutando
 struct process p;
 //Tiempo actual y tiempo hasta el final del proceso
-int seconds, end;
+int seconds;
 //Booleano para avisar final del programa
 short bit;
 //Semáforos para sincronización
-sem_t process, ready, dispatch;
+sem_t ready, dispatch;
 //Cola de procesos a manejar por el dispatcher
 SuperCola jobList;
 //Procesos por llegar, cantidad y un iterador
-struct process beforeArrival[1024];
+struct process beforeArrival[512];
 int n, actual;
 //Mayor prioridad en la cola actualmente
 short priority;
 
-void* processor(){
-	sem_wait(&process);
-
-	while(1){
-		for (; seconds < end; ++seconds){
-			sem_wait(&process);
-			printf("Segundo %d: #%d EXECUTING\n", seconds, p.pid);
-			if (seconds != end - 1) sem_post(&ready);
-		}
-
-		p.procTime = -1;
-		sem_post(&ready);
-		sem_wait(&process);
-	}
-}
-
 void timer(){
 	sem_wait(&ready);
+	int timeSpent = 0, lastProcess;
 
 	while (bit){
 		sleep(1);
 
 		--p.quantum;
+		--p.procTime;
+		++timeSpent;
+
+		if (timeSpent >= 20) p.procTime = 0;
 
 		//Se agregan todos los procesos que llegan a un tiempo determinado
 		while (actual < n && beforeArrival[actual].arrival <= seconds){
 			SuperColaPush(&jobList, beforeArrival[actual]);
 
-			if (beforeArrival[actual].priority < priority)
+			if (beforeArrival[actual].priority < priority){
 				priority = beforeArrival[actual].priority;
+			}
 			
 			++actual;
 		}
 
 
 		//Se acaba el quantum con procesos en espera, termina el proceso o llega un proceso de mayor prioridad
-		if ((p.quantum <= 0 && jobList.size > 0) || p.procTime < 0 || priority < p.priority){
+		if ((p.quantum <= 0 && jobList.size > 0) || p.procTime <= 0 || priority < p.priority){
+			lastProcess = p.pid;
+			
 			sem_post(&dispatch);
 			sem_wait(&ready);
+
+			if (p.pid != lastProcess) timeSpent = 0;
 		}else{
-			sem_post(&process);
-			sem_wait(&ready);
+			// sem_post(&process);
+			// sem_wait(&ready);
+			printf("Segundo %d: #%d EXECUTING\n", seconds, p.pid);
+			++seconds;
 		}
 	}
 }
 
 void* dispatcher(){
-	int start, lastDead = 1;
 	printf("Segundo 0: ");
 
 	while (SuperColaPop(&jobList, &p)){
-		printf("#%d BEGIN\n", p.pid);
-
-		start = seconds;
-
-		//El primer segundo del proceso es el de BEGIN
-		end = seconds + p.procTime - 1;
+		printf("#%d BEGIN\n", p.pid);		
 
 		//Se guarda la mayor prioridad en la cola
 		priority = p.priority;
 
-		if (lastDead){
-			sem_post(&process);
-			lastDead = 0;
-		}
 		sem_post(&ready);
 		sem_wait(&dispatch);
 
+		//p.procTime -= seconds - start;
+		++seconds;
+
 		if (p.procTime > 0){
-			printf("Segundo %d: #%d SUSPENSION ", seconds, p.pid);
-			++seconds;
-			p.procTime -= seconds - start;
+			printf("Segundo %d: #%d SUSPENSION ", seconds - 1, p.pid);
 
 			if (p.priority < 3) ++p.priority;
 			
 			SuperColaPush(&jobList, p);
 		}else{
-			printf("Segundo %d: #%d END\n", seconds, p.pid);
-			++seconds;
-			lastDead = 1;
+			printf("Segundo %d: #%d END\n", seconds - 1, p.pid);
 			if (jobList.size > 0){
-				printf("Segundo %d: ", seconds);
 				sleep(1);
+				printf("Segundo %d: ", seconds);
 			}
+			++seconds;
 		}
 	}
 
@@ -173,17 +159,17 @@ struct process filtrarInput(char* linea, pid_t pidCount){
 		temp.modem=m;
 		temp.dvd=d;
 		temp.quantum=0;
+		temp.assigned=0;
 	
 	return temp;
 	
 }
 
 int main(int argc, char *argv[]){
-	pthread_t t[2];
+	pthread_t t;
 	struct process temp;
 	char *nombreArchivo= argv[1];
 
-	sem_init(&process, 0, 0);
 	sem_init(&ready, 0, 0);
 	sem_init(&dispatch, 0, 0);
 
@@ -191,8 +177,6 @@ int main(int argc, char *argv[]){
 
 	//El primer segundo es de BEGIN
 	seconds = 1;
-	//Placeholder antes de tener el primer proceso
-	end = 999; 
 	//Inicializando iterador y tamaño
 	actual = 0;
 	n = 0;
@@ -215,23 +199,20 @@ int main(int argc, char *argv[]){
 				++n;
 			}else{
 				SuperColaPush(&jobList, temp);
-			}//Sólo se meten a la cola los procesos que llegan al segundo 0
+			}//Sólo se meten a la cola los procesos que llegan al segundo 0 
 		}
 	}
 	fclose(i);
 
 	sortByArrival(beforeArrival, n); //Se ordenan los procesos por tiempo de llegada
 
-	pthread_create(t, NULL, dispatcher, NULL);
-	pthread_create(t + 1, NULL, processor, NULL);
+	pthread_create(&t, NULL, dispatcher, NULL);
 
 	timer();
 
-	pthread_cancel(t[1]);
-	pthread_join(t[0], NULL);
+	pthread_join(t, NULL);
 
 	SuperColaDestroy(&jobList);
-	sem_destroy(&process);
 	sem_destroy(&ready);
 	sem_destroy(&dispatch);
 
