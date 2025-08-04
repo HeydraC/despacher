@@ -154,16 +154,18 @@ void *dispatcher()
 			++seconds;
 			sem_post(&ready);
 			sem_wait(&dispatch);
+			firstCycle = 1;
 			continue;
 			//Continúa la ejecución en caso de haber procesos por llegar
 		}
 
 		if (firstCycle)
 		{
-			printf("Segundo %d: ", seconds - 1);
-			fprintf(file, "Segundo %d: ", seconds - 1);
+			printf("Segundo %d: ", seconds);
+			fprintf(file, "Segundo %d: ", seconds);
 			firstCycle = 0;
-			//En caso de ser la primera vez que se imprime, ya que las demás se hacen por separado
+			++seconds;
+			//En caso de ser la primera vez que se imprime o hayan pasado segundos sin proceso
 		}
 
 		printf("#%d BEGIN\n", p.pid); //Se indica el inicio del proceso sacado de la cola
@@ -312,7 +314,7 @@ int main(int argc, char *argv[])
 	bit = 1;
 
 	// El primer segundo es de BEGIN
-	seconds = 1;
+	seconds = 0;
 	// Inicializando iterador y tamaño
 	actual = 0;
 	n = 0;
